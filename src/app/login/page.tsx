@@ -34,7 +34,7 @@ function LoginForm() {
   return (
     <div className="loginwrap">
       <aside className="loginart">
-        <div><h1>SIIGP</h1><p style={{ marginTop: 8 }}>Sistema Inteligente de Gestão Predial</p></div>
+        <div><h1>SIIGP</h1><p style={{ marginTop: 8 }}>Sistema Integrado de Inspeção e Gestão Predial</p></div>
         <p>Cadastro e gestão de empreendimentos: clientes, estrutura física, responsáveis e histórico em um só lugar.</p>
       </aside>
       <main className="loginform" id="conteudo">
