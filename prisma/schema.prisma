@@ -1,0 +1,516 @@
+// SIIGP – RF01: Cadastro e Gestão de Empreendimentos
+// Convenções: UUID como PK, tabelas/colunas em snake_case, timestamps com fuso,
+// exclusão restritiva (nada é apagado em cascata) e desativação lógica via `status`.
+// Regras que o Prisma não expressa (CHECK, triggers de integridade entre
+// empreendimentos) estão em prisma/migrations/*_integrity_rules/migration.sql.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "client"
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum RecordStatus {
+  ACTIVE
+  INACTIVE
+
+  @@map("record_status")
+}
+
+enum UserRole {
+  ADMIN
+  EDITOR
+  VIEWER
+
+  @@map("user_role")
+}
+
+enum PersonType {
+  INDIVIDUAL
+  LEGAL_ENTITY
+
+  @@map("person_type")
+}
+
+enum ProjectType {
+  RESIDENTIAL_HORIZONTAL
+  RESIDENTIAL_VERTICAL
+  COMMERCIAL
+  MIXED_USE
+  INDUSTRIAL
+  HOSPITAL
+  EDUCATIONAL
+  PUBLIC
+  STANDALONE
+  OTHER
+
+  @@map("project_type")
+}
+
+enum UseType {
+  RESIDENTIAL
+  COMMERCIAL
+  MIXED
+  INDUSTRIAL
+  INSTITUTIONAL
+  HEALTHCARE
+  EDUCATIONAL
+  PUBLIC
+  OTHER
+
+  @@map("use_type")
+}
+
+enum BuildingType {
+  BLOCK
+  TOWER
+  STANDALONE
+  AUXILIARY
+  PARKING
+  OTHER
+
+  @@map("building_type")
+}
+
+enum LocationType {
+  FLOOR
+  ROOM
+  CIRCULATION
+  TECHNICAL_AREA
+  EXTERNAL_AREA
+  UNIT
+  OTHER
+
+  @@map("location_type")
+}
+
+enum FloorKind {
+  BASEMENT
+  GROUND
+  MEZZANINE
+  STANDARD
+  PENTHOUSE
+  ROOF
+  TECHNICAL
+  OTHER
+
+  @@map("floor_kind")
+}
+
+enum AreaClass {
+  COMMON
+  PRIVATE
+  UNDEFINED
+
+  @@map("area_class")
+}
+
+enum UnitType {
+  RESIDENTIAL
+  COMMERCIAL
+  INDUSTRIAL
+  INSTITUTIONAL
+  OTHER
+
+  @@map("unit_type")
+}
+
+enum ResponsibleRole {
+  SYNDIC
+  SUB_SYNDIC
+  ADMINISTRATOR
+  FACILITY_MANAGER
+  CARETAKER
+  MAINTENANCE_MANAGER
+  TECHNICAL_MANAGER
+  ADMIN_CONTACT
+  OTHER
+
+  @@map("responsible_role")
+}
+
+enum HistoryCategory {
+  CONSTRUCTION
+  EXPANSION
+  RENOVATION
+  USE_CHANGE
+  RELEVANT_INTERVENTION
+  INCIDENT
+  RELEVANT_OCCURRENCE
+  REGISTRY_UPDATE
+  OTHER
+
+  @@map("history_category")
+}
+
+// ───────────────────── Organização e acesso mínimo ─────────────────────
+
+model Organization {
+  id        String       @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String       @unique
+  status    RecordStatus @default(ACTIVE)
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  users                  User[]
+  clients                Client[]
+  projects               Project[]
+  projectCharacteristics ProjectCharacteristics[]
+  buildings              Building[]
+  locations              Location[]
+  privateUnits           PrivateUnit[]
+  responsibles           ProjectResponsible[]
+  assignments            ProjectResponsibleAssignment[]
+  history                ProjectHistory[]
+  attachments            ProjectHistoryAttachment[]
+  auditLogs              AuditLog[]
+
+  @@map("organizations")
+}
+
+// Infraestrutura mínima de autenticação (não é o módulo de gestão de usuários – RF13).
+model User {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  name           String
+  email          String       @unique
+  passwordHash   String       @map("password_hash")
+  role           UserRole     @default(VIEWER)
+  status         RecordStatus @default(ACTIVE)
+  lastLoginAt    DateTime?    @map("last_login_at") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@map("users")
+}
+
+// ───────────────────────────── RF-001 Clientes ─────────────────────────────
+
+model Client {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  personType     PersonType   @map("person_type")
+  name           String
+  tradeName      String?      @map("trade_name")
+  document       String?      @db.VarChar(14) // CPF (11 dígitos) ou CNPJ (14, numérico ou alfanumérico)
+  email          String?
+  phone          String?
+  addressLine    String?      @map("address_line")
+  addressNumber  String?      @map("address_number")
+  complement     String?
+  district       String?
+  city           String?
+  state          String?      @db.VarChar(2)
+  zipCode        String?      @map("zip_code") @db.VarChar(8)
+  contactName    String?      @map("contact_name")
+  notes          String?
+  status         RecordStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  projects     Project[]
+
+  // NULLs são distintos no PostgreSQL: vários clientes sem documento são permitidos,
+  // mas o mesmo CPF/CNPJ não se repete na organização.
+  @@unique([organizationId, document])
+  @@index([organizationId, status])
+  @@index([organizationId, name])
+  @@map("clients")
+}
+
+// ───────────────────────────── RF-002 Empreendimentos ─────────────────────────────
+
+model Project {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  clientId       String       @map("client_id") @db.Uuid
+  code           String
+  name           String
+  projectType    ProjectType  @map("project_type")
+  addressLine    String       @map("address_line")
+  addressNumber  String?      @map("address_number")
+  complement     String?
+  district       String?
+  city           String
+  state          String       @db.VarChar(2)
+  zipCode        String?      @map("zip_code") @db.VarChar(8)
+  latitude       Decimal?     @db.Decimal(9, 6)
+  longitude      Decimal?     @db.Decimal(9, 6)
+  description    String?
+  status         RecordStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization    Organization                   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  client          Client                         @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  characteristics ProjectCharacteristics?
+  buildings       Building[]
+  locations       Location[]
+  privateUnits    PrivateUnit[]
+  assignments     ProjectResponsibleAssignment[]
+  history         ProjectHistory[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, clientId])
+  @@index([organizationId, status])
+  @@index([organizationId, name])
+  @@map("projects")
+}
+
+// ───────────────────────────── RF-003 Caracterização técnica ─────────────────────────────
+// Número de blocos, pavimentos e unidades NÃO é armazenado: é calculado a partir
+// dos cadastros (buildings/locations) para evitar inconsistência com dado digitado.
+
+model ProjectCharacteristics {
+  id                   String   @id @default(uuid()) @db.Uuid
+  organizationId       String   @map("organization_id") @db.Uuid
+  projectId            String   @unique @map("project_id") @db.Uuid
+  landAreaM2           Decimal? @map("land_area_m2") @db.Decimal(14, 2)
+  builtAreaM2          Decimal? @map("built_area_m2") @db.Decimal(14, 2)
+  constructionYear     Int?     @map("construction_year")
+  estimatedAgeYears    Int?     @map("estimated_age_years")
+  useType              UseType? @map("use_type")
+  occupancyType        String?  @map("occupancy_type")
+  constructionTypology String?  @map("construction_typology")
+  predominantSystem    String?  @map("predominant_system")
+  structureInfo        String?  @map("structure_info")
+  expansionsInfo       String?  @map("expansions_info")
+  renovationsInfo      String?  @map("renovations_info")
+  technicalNotes       String?  @map("technical_notes")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@map("project_characteristics")
+}
+
+// ───────────────────────────── RF-004 Edificações e blocos ─────────────────────────────
+
+model Building {
+  id               String       @id @default(uuid()) @db.Uuid
+  organizationId   String       @map("organization_id") @db.Uuid
+  projectId        String       @map("project_id") @db.Uuid
+  code             String
+  name             String
+  buildingType     BuildingType @default(BLOCK) @map("building_type")
+  description      String?
+  builtAreaM2      Decimal?     @map("built_area_m2") @db.Decimal(14, 2)
+  constructionYear Int?         @map("construction_year")
+  notes            String?
+  sortOrder        Int          @default(0) @map("sort_order")
+  status           RecordStatus @default(ACTIVE)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  locations    Location[]
+
+  @@unique([projectId, code])
+  @@index([organizationId, projectId])
+  @@index([projectId, status])
+  @@map("buildings")
+}
+
+// ───────── RF-005, RF-006, RF-007 Pavimentos, ambientes e áreas comuns ─────────
+// Uma única tabela hierárquica. Pavimento, ambiente, área externa, unidade etc.
+// são `location_type`; a classificação comum/privativa é `area_class` (atributo
+// independente do tipo físico).
+
+model Location {
+  id               String       @id @default(uuid()) @db.Uuid
+  organizationId   String       @map("organization_id") @db.Uuid
+  projectId        String       @map("project_id") @db.Uuid
+  buildingId       String?      @map("building_id") @db.Uuid
+  parentLocationId String?      @map("parent_location_id") @db.Uuid
+  code             String
+  name             String
+  locationType     LocationType @map("location_type")
+  areaClass        AreaClass    @default(UNDEFINED) @map("area_class")
+  floorKind        FloorKind?   @map("floor_kind")
+  floorOrder       Int?         @map("floor_order") // negativo = subsolo; 0 = térreo
+  elevationM       Decimal?     @map("elevation_m") @db.Decimal(8, 2)
+  sortOrder        Int          @default(0) @map("sort_order")
+  areaM2           Decimal?     @map("area_m2") @db.Decimal(14, 2)
+  description      String?
+  // Escopo de unicidade do código: id do bloco, ou id do empreendimento quando a
+  // localização não pertence a bloco. Preenchido pelo trigger siigp_location_integrity.
+  codeScopeId      String       @default(dbgenerated("'00000000-0000-0000-0000-000000000000'::uuid")) @map("code_scope_id") @db.Uuid
+  status           RecordStatus @default(ACTIVE)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  building     Building?    @relation(fields: [buildingId], references: [id], onDelete: Restrict)
+  parent       Location?    @relation("LocationTree", fields: [parentLocationId], references: [id], onDelete: Restrict)
+  children     Location[]   @relation("LocationTree")
+  privateUnit  PrivateUnit?
+
+  @@unique([projectId, codeScopeId, code])
+  @@index([organizationId, projectId])
+  @@index([projectId, buildingId])
+  @@index([parentLocationId])
+  @@index([projectId, locationType])
+  @@index([projectId, status])
+  @@index([projectId, name])
+  @@map("locations")
+}
+
+// ───────────────────────────── RF-008 Unidades privativas ─────────────────────────────
+// A unidade é uma localização (type = UNIT) com atributos próprios.
+// Código, identificação (name), situação e posição na hierarquia ficam em `locations`.
+// Sem dados de moradores/locatários.
+
+model PrivateUnit {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  projectId      String   @map("project_id") @db.Uuid
+  locationId     String   @unique @map("location_id") @db.Uuid
+  unitType       UnitType @map("unit_type")
+  privateAreaM2  Decimal? @map("private_area_m2") @db.Decimal(14, 2)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  location     Location     @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, projectId])
+  @@index([projectId, unitType])
+  @@map("private_units")
+}
+
+// ───────────────────────────── RF-009 Responsáveis ─────────────────────────────
+// `project_responsibles` é o cadastro da pessoa/entidade (reutilizável em vários
+// empreendimentos). A função e o período ficam no vínculo, pois a mesma pessoa
+// pode ter funções diferentes em empreendimentos diferentes.
+// NÃO é usuário autenticado da plataforma.
+
+model ProjectResponsible {
+  id                       String       @id @default(uuid()) @db.Uuid
+  organizationId           String       @map("organization_id") @db.Uuid
+  name                     String
+  companyName              String?      @map("company_name")
+  email                    String?
+  phone                    String?
+  professionalRegistration String?      @map("professional_registration")
+  notes                    String?
+  status                   RecordStatus @default(ACTIVE)
+  createdAt                DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization                   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  assignments  ProjectResponsibleAssignment[]
+
+  @@index([organizationId, name])
+  @@index([organizationId, status])
+  @@map("project_responsibles")
+}
+
+model ProjectResponsibleAssignment {
+  id             String          @id @default(uuid()) @db.Uuid
+  organizationId String          @map("organization_id") @db.Uuid
+  projectId      String          @map("project_id") @db.Uuid
+  responsibleId  String          @map("responsible_id") @db.Uuid
+  role           ResponsibleRole
+  roleDetail     String?         @map("role_detail")
+  startDate      DateTime        @map("start_date") @db.Date
+  endDate        DateTime?       @map("end_date") @db.Date
+  notes          String?
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project      Project            @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  responsible  ProjectResponsible @relation(fields: [responsibleId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, responsibleId, role, startDate])
+  @@index([organizationId, projectId])
+  @@index([responsibleId])
+  @@map("project_responsible_assignments")
+}
+
+// ───────────────────────────── RF-010 Histórico ─────────────────────────────
+
+model ProjectHistory {
+  id               String          @id @default(uuid()) @db.Uuid
+  organizationId   String          @map("organization_id") @db.Uuid
+  projectId        String          @map("project_id") @db.Uuid
+  category         HistoryCategory
+  title            String
+  description      String?
+  occurredOn       DateTime        @map("occurred_on") @db.Date
+  recordedByUserId String?         @map("recorded_by_user_id") @db.Uuid
+  notes            String?
+  // Vínculo futuro com outros módulos (ex.: reforma, ocorrência), sem FK nesta etapa.
+  sourceType       String?         @map("source_type")
+  sourceId         String?         @map("source_id") @db.Uuid
+  status           RecordStatus    @default(ACTIVE)
+  voidReason       String?         @map("void_reason")
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization               @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project      Project                    @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  attachments  ProjectHistoryAttachment[]
+
+  @@index([projectId, occurredOn])
+  @@index([projectId, category])
+  @@index([organizationId])
+  @@index([sourceType, sourceId])
+  @@map("project_history")
+}
+
+model ProjectHistoryAttachment {
+  id               String   @id @default(uuid()) @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  historyId        String   @map("history_id") @db.Uuid
+  fileName         String   @map("file_name")
+  mimeType         String   @map("mime_type")
+  sizeBytes        Int      @map("size_bytes")
+  sha256           String   @db.VarChar(64)
+  storageKey       String   @unique @map("storage_key")
+  uploadedByUserId String?  @map("uploaded_by_user_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  history      ProjectHistory @relation(fields: [historyId], references: [id], onDelete: Restrict)
+
+  @@index([historyId])
+  @@index([organizationId])
+  @@map("project_history_attachments")
+}
+
+// ───────────────────────────── Rastreabilidade ─────────────────────────────
+
+model AuditLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  userId         String?  @map("user_id") @db.Uuid
+  entityType     String   @map("entity_type")
+  entityId       String   @map("entity_id") @db.Uuid
+  action         String
+  changes        Json?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, entityType, entityId])
+  @@index([organizationId, createdAt])
+  @@map("audit_logs")
+}

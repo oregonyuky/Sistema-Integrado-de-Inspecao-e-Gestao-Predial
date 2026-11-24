@@ -1,0 +1,5 @@
+export type B = { id: string; code: string; name: string; buildingType: string; description: string | null; builtAreaM2: number | null; constructionYear: number | null; notes: string | null; sortOrder: number; status: "ACTIVE" | "INACTIVE" };
+export type L = { id: string; buildingId: string | null; parentLocationId: string | null; code: string; name: string; locationType: string; areaClass: string; floorKind: string | null; floorOrder: number | null; elevationM: number | null; sortOrder: number; areaM2: number | null; description: string | null; status: "ACTIVE" | "INACTIVE"; unit: { unitType: string; privateAreaM2: number | null } | null };
+export type Tree = { project: { id: string; code: string; name: string; status: string }; buildings: B[]; locations: L[] };
+export type Sel = { kind: "b"; id: string } | { kind: "l"; id: string } | null;
+export type Target = { buildingId: string | null; parentLocationId: string | null; label: string; mode: "building" | "floor" | "child" | "root" };
