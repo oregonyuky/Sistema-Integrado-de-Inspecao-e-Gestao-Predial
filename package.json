@@ -13,6 +13,7 @@
     "db:apply": "tsx scripts/db-apply.ts",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:demo": "tsx prisma/seed.ts --demo",
+    "db:seed:catalog": "tsx prisma/seed-catalog.ts",
     "test": "vitest run"
   },
   "dependencies": {

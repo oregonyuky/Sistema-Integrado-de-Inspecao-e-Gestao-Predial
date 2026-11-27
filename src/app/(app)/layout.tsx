@@ -9,6 +9,9 @@ import { roleLabels } from "@/lib/labels";
 const NAV = [
   { href: "/empreendimentos", label: "Empreendimentos" },
   { href: "/clientes", label: "Clientes" },
+  { href: "/catalogo", label: "Catálogo técnico" },
+  { href: "/normas", label: "Normas" },
+  { href: "/manifestacoes", label: "Manifestações" },
   { href: "/responsaveis", label: "Responsáveis" },
 ];
 

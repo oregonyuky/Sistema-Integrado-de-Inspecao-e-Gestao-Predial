@@ -159,18 +159,29 @@ model Organization {
   createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  users                  User[]
-  clients                Client[]
-  projects               Project[]
-  projectCharacteristics ProjectCharacteristics[]
-  buildings              Building[]
-  locations              Location[]
-  privateUnits           PrivateUnit[]
-  responsibles           ProjectResponsible[]
-  assignments            ProjectResponsibleAssignment[]
-  history                ProjectHistory[]
-  attachments            ProjectHistoryAttachment[]
-  auditLogs              AuditLog[]
+  users                   User[]
+  clients                 Client[]
+  projects                Project[]
+  projectCharacteristics  ProjectCharacteristics[]
+  buildings               Building[]
+  locations               Location[]
+  privateUnits            PrivateUnit[]
+  responsibles            ProjectResponsible[]
+  assignments             ProjectResponsibleAssignment[]
+  history                 ProjectHistory[]
+  attachments             ProjectHistoryAttachment[]
+  auditLogs               AuditLog[]
+  catalogItems            CatalogItem[]
+  components              Component[]
+  projectSystems          ProjectSystem[]
+  norms                   Norm[]
+  normEditions            NormEdition[]
+  normSections            NormSection[]
+  catalogNormLinks        CatalogItemNormSection[]
+  inspectionCriteria      InspectionCriterion[]
+  manifestations          Manifestation[]
+  classifications         TechnicalClassification[]
+  manifestationClassLinks ManifestationClassification[]
 
   @@map("organizations")
 }
@@ -260,6 +271,8 @@ model Project {
   privateUnits    PrivateUnit[]
   assignments     ProjectResponsibleAssignment[]
   history         ProjectHistory[]
+  components      Component[]
+  projectSystems  ProjectSystem[]
 
   @@unique([organizationId, code])
   @@index([organizationId, clientId])
@@ -360,6 +373,7 @@ model Location {
   parent       Location?    @relation("LocationTree", fields: [parentLocationId], references: [id], onDelete: Restrict)
   children     Location[]   @relation("LocationTree")
   privateUnit  PrivateUnit?
+  components   Component[]
 
   @@unique([projectId, codeScopeId, code])
   @@index([organizationId, projectId])
@@ -513,4 +527,273 @@ model AuditLog {
   @@index([organizationId, entityType, entityId])
   @@index([organizationId, createdAt])
   @@map("audit_logs")
+}
+
+// ═════════════════════════ MOD-02 – Catálogo técnico e sistemas prediais ═════════════════════════
+// RF-011..RF-022. Catálogo mestre é por organização; componentes pertencem a um empreendimento.
+// Regras de integridade (tipos de nó, mesma organização/empreendimento, imutabilidade do
+// identificador) estão em prisma/migrations/*_catalog_integrity/migration.sql.
+
+enum CatalogItemKind {
+  SYSTEM
+  SUBSYSTEM
+  TYPE
+
+  @@map("catalog_item_kind")
+}
+
+enum CriterionResponse {
+  PASS_FAIL
+  YES_NO
+  NUMBER
+  TEXT
+  SINGLE_CHOICE
+
+  @@map("criterion_response")
+}
+
+enum ClassificationKind {
+  SEVERITY
+  ORIGIN
+  RISK
+  URGENCY
+  OTHER
+
+  @@map("classification_kind")
+}
+
+// RF-011 / RF-013 – sistema → subsistema → tipo de componente (biblioteca)
+model CatalogItem {
+  id             String          @id @default(uuid()) @db.Uuid
+  organizationId String          @map("organization_id") @db.Uuid
+  parentId       String?         @map("parent_id") @db.Uuid
+  kind           CatalogItemKind
+  code           String
+  name           String
+  description    String?
+  sortOrder      Int             @default(0) @map("sort_order")
+  status         RecordStatus    @default(ACTIVE)
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  parent       CatalogItem?             @relation("CatalogTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children     CatalogItem[]            @relation("CatalogTree")
+  components   Component[]
+  systemUses   ProjectSystem[]
+  normLinks    CatalogItemNormSection[]
+  criteria     InspectionCriterion[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, kind])
+  @@index([parentId])
+  @@map("catalog_items")
+}
+
+// RF-012 / RF-014 – componente individual, com identificador único e imutável
+model Component {
+  id             String       @id @default(uuid()) @db.Uuid
+  seq            Int          @unique @default(autoincrement())
+  publicCode     String       @unique @default("") @map("public_code") // CMP-000001, definido por trigger
+  organizationId String       @map("organization_id") @db.Uuid
+  projectId      String       @map("project_id") @db.Uuid
+  typeId         String       @map("type_id") @db.Uuid
+  locationId     String?      @map("location_id") @db.Uuid
+  name           String
+  tag            String? // plaqueta / patrimônio, único no empreendimento
+  manufacturer   String?
+  model          String?
+  serialNumber   String?      @map("serial_number")
+  installedOn    DateTime?    @map("installed_on") @db.Date
+  description    String?
+  notes          String?
+  status         RecordStatus @default(ACTIVE)
+  deactivatedAt  DateTime?    @map("deactivated_at") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  type         CatalogItem  @relation(fields: [typeId], references: [id], onDelete: Restrict)
+  location     Location?    @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, tag])
+  @@index([organizationId, projectId, status])
+  @@index([typeId])
+  @@index([locationId])
+  @@map("components")
+}
+
+// RF-018 – sistemas do catálogo selecionados em cada empreendimento
+model ProjectSystem {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  projectId      String       @map("project_id") @db.Uuid
+  systemId       String       @map("system_id") @db.Uuid
+  notes          String?
+  status         RecordStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  system       CatalogItem  @relation(fields: [systemId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, systemId])
+  @@index([organizationId, projectId])
+  @@map("project_systems")
+}
+
+// RF-019 – biblioteca normativa: norma → edição → seção, vinculada ao catálogo
+model Norm {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  code           String // ex.: ABNT NBR 5674
+  title          String
+  issuer         String?
+  description    String?
+  status         RecordStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  editions     NormEdition[]
+
+  @@unique([organizationId, code])
+  @@map("norms")
+}
+
+model NormEdition {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  normId         String       @map("norm_id") @db.Uuid
+  edition        String // ex.: 2012, 2ª edição
+  publishedOn    DateTime?    @map("published_on") @db.Date
+  isCurrent      Boolean      @default(false) @map("is_current")
+  notes          String?
+  status         RecordStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  norm         Norm          @relation(fields: [normId], references: [id], onDelete: Restrict)
+  sections     NormSection[]
+
+  @@unique([normId, edition])
+  @@map("norm_editions")
+}
+
+model NormSection {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  editionId      String       @map("edition_id") @db.Uuid
+  ref            String // ex.: 5.2.1
+  title          String
+  summary        String?
+  sortOrder      Int          @default(0) @map("sort_order")
+  status         RecordStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  edition      NormEdition              @relation(fields: [editionId], references: [id], onDelete: Restrict)
+  catalogLinks CatalogItemNormSection[]
+
+  @@unique([editionId, ref])
+  @@map("norm_sections")
+}
+
+model CatalogItemNormSection {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  catalogItemId  String   @map("catalog_item_id") @db.Uuid
+  sectionId      String   @map("section_id") @db.Uuid
+  notes          String?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  catalogItem  CatalogItem  @relation(fields: [catalogItemId], references: [id], onDelete: Restrict)
+  section      NormSection  @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+
+  @@unique([catalogItemId, sectionId])
+  @@map("catalog_item_norm_sections")
+}
+
+// RF-020 – critérios (campos do formulário de inspeção) por tipo de componente
+model InspectionCriterion {
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String            @map("organization_id") @db.Uuid
+  typeId         String            @map("type_id") @db.Uuid
+  code           String
+  label          String
+  description    String?
+  responseType   CriterionResponse @map("response_type")
+  required       Boolean           @default(true)
+  unit           String?
+  minValue       Decimal?          @map("min_value") @db.Decimal(14, 4)
+  maxValue       Decimal?          @map("max_value") @db.Decimal(14, 4)
+  options        String[]
+  sortOrder      Int               @default(0) @map("sort_order")
+  status         RecordStatus      @default(ACTIVE)
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  type         CatalogItem  @relation(fields: [typeId], references: [id], onDelete: Restrict)
+
+  @@unique([typeId, code])
+  @@map("inspection_criteria")
+}
+
+// RF-021 – biblioteca de manifestações e, separadamente, de classificações técnicas
+model Manifestation {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  code           String
+  name           String
+  description    String?
+  typicalCauses  String?      @map("typical_causes")
+  status         RecordStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  classLinks   ManifestationClassification[]
+
+  @@unique([organizationId, code])
+  @@map("manifestations")
+}
+
+model TechnicalClassification {
+  id             String             @id @default(uuid()) @db.Uuid
+  organizationId String             @map("organization_id") @db.Uuid
+  code           String
+  name           String
+  kind           ClassificationKind
+  description    String?
+  sortOrder      Int                @default(0) @map("sort_order")
+  status         RecordStatus       @default(ACTIVE)
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization  Organization                  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  manifestLinks ManifestationClassification[]
+
+  @@unique([organizationId, code])
+  @@map("technical_classifications")
+}
+
+model ManifestationClassification {
+  id               String   @id @default(uuid()) @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  manifestationId  String   @map("manifestation_id") @db.Uuid
+  classificationId String   @map("classification_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  manifestation  Manifestation           @relation(fields: [manifestationId], references: [id], onDelete: Restrict)
+  classification TechnicalClassification @relation(fields: [classificationId], references: [id], onDelete: Restrict)
+
+  @@unique([manifestationId, classificationId])
+  @@map("manifestation_classifications")
 }

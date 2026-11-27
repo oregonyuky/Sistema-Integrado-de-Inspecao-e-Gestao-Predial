@@ -1,6 +1,9 @@
 import { z } from "zod";
 import {
   AreaClass,
+  CatalogItemKind,
+  ClassificationKind,
+  CriterionResponse,
   BuildingType,
   FloorKind,
   HistoryCategory,
@@ -364,3 +367,101 @@ export type ResponsibleInput = z.output<typeof responsibleSchema>;
 export type AssignmentCreateInput = z.output<typeof assignmentCreateSchema>;
 export type AssignmentUpdateInput = z.output<typeof assignmentUpdateSchema>;
 export type HistoryInput = z.output<typeof historySchema>;
+
+
+// ═════════════ MOD-02 – Catálogo técnico e sistemas prediais ═════════════
+
+export const catalogItemSchema = z.object({
+  kind: nativeEnum(CatalogItemKind, "Selecione o nível do item."),
+  parentId: z.string().uuid("Identificador inválido.").nullish().transform((v) => v ?? null),
+  code,
+  name: reqText(200),
+  description: optText(4000),
+});
+/** Edição: o nível não muda; o pai pode mudar (mover na árvore). */
+export const catalogItemUpdateSchema = catalogItemSchema.omit({ kind: true });
+
+export const componentSchema = z.object({
+  typeId: uuid,
+  locationId: z.string().uuid("Identificador inválido.").nullish().transform((v) => v ?? null),
+  name: reqText(200),
+  tag: optText(60),
+  manufacturer: optText(120),
+  model: optText(120),
+  serialNumber: optText(120),
+  installedOn: optIsoDate,
+  description: optText(4000),
+  notes: optText(4000),
+});
+/** O tipo é imutável depois do cadastro. */
+export const componentUpdateSchema = componentSchema.omit({ typeId: true });
+
+export const componentQuery = z.object({
+  q: z.string().trim().max(100).optional(),
+  systemId: z.string().uuid().optional(),
+  typeId: z.string().uuid().optional(),
+  locationId: z.string().uuid().optional(),
+  status: statusFilter,
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export const projectSystemSchema = z.object({ systemId: uuid, notes: optText(2000) });
+
+export const normSchema = z.object({
+  code: reqText(60),
+  title: reqText(300),
+  issuer: optText(120),
+  description: optText(4000),
+});
+export const normEditionSchema = z.object({
+  edition: reqText(60),
+  publishedOn: optIsoDate,
+  isCurrent: z.boolean().optional().default(false),
+  notes: optText(2000),
+});
+export const normSectionSchema = z.object({
+  ref: reqText(40),
+  title: reqText(300),
+  summary: optText(4000),
+});
+export const normLinkSchema = z.object({ sectionId: uuid, notes: optText(1000) });
+
+export const criterionSchema = z
+  .object({
+    code,
+    label: reqText(300),
+    description: optText(2000),
+    responseType: nativeEnum(CriterionResponse, "Selecione o tipo de resposta."),
+    required: z.boolean().optional().default(true),
+    unit: optText(30),
+    minValue: optNumber({ min: -1e9, max: 1e9 }),
+    maxValue: optNumber({ min: -1e9, max: 1e9 }),
+    options: z.array(z.string().trim().min(1, "Opção vazia.").max(100, "Máximo de 100 caracteres.")).max(20, "Máximo de 20 opções.").optional().default([]),
+  })
+  .superRefine((v, ctx) => {
+    if (v.responseType === "SINGLE_CHOICE") {
+      const uniq = new Set(v.options.map((o) => o.toLowerCase()));
+      if (v.options.length < 2) ctx.addIssue({ code: "custom", path: ["options"], message: "Informe ao menos duas opções." });
+      else if (uniq.size !== v.options.length) ctx.addIssue({ code: "custom", path: ["options"], message: "As opções não podem se repetir." });
+    }
+    if (v.responseType !== "SINGLE_CHOICE" && v.options.length) ctx.addIssue({ code: "custom", path: ["options"], message: "Opções só se aplicam a resposta de escolha única." });
+    if (v.responseType !== "NUMBER" && (v.minValue !== null || v.maxValue !== null || v.unit))
+      ctx.addIssue({ code: "custom", path: ["minValue"], message: "Unidade e limites só se aplicam a resposta numérica." });
+    if (v.minValue !== null && v.maxValue !== null && v.minValue > v.maxValue)
+      ctx.addIssue({ code: "custom", path: ["maxValue"], message: "O máximo não pode ser menor que o mínimo." });
+  });
+
+export const manifestationSchema = z.object({
+  code,
+  name: reqText(200),
+  description: optText(4000),
+  typicalCauses: optText(4000),
+  classificationIds: z.array(uuid).max(50).optional().default([]),
+});
+export const classificationSchema = z.object({
+  code,
+  name: reqText(200),
+  kind: nativeEnum(ClassificationKind, "Selecione a dimensão."),
+  description: optText(4000),
+});

@@ -14,10 +14,13 @@ npx prisma generate
 npm run db:migrate              # prisma migrate deploy  (alternativa sem binários do Prisma: npm run db:apply)
 npm run db:seed                 # cria organização + usuário ADMIN a partir de SEED_*
 npm run db:seed:demo            # (opcional) dados de demonstração: "Condomínio Residencial Atenas"
+npm run db:seed:catalog         # (opcional, MOD-02) catálogo inicial genérico; com --demo também seleciona sistemas e cria 2 componentes no ATENAS
 npm run dev                     # http://localhost:3000   |   produção: npm run build && npm start
 npm test                        # exige TEST_DATABASE_URL apontando para um banco VAZIO/descartável (é resetado!)
 ```
 Anexos são gravados em `STORAGE_DIR` (fora de `public/`) e só são servidos por `/api/attachments/:id`, autenticado.
+
+> 📖 Guia completo de todas as telas (RF01 + MOD-02): **[README-TELAS.md](README-TELAS.md)**
 
 ## Telas do sistema e como funcionam
 
@@ -102,5 +105,47 @@ A interface se adapta a telas pequenas: o menu lateral vira um botão "Menu", as
 - Um vínculo de responsável encerrado "hoje" continua vigente até o fim do dia (a data de término vale inclusive).
 - `npm run db:apply` foi criado porque o download dos binários do Prisma estava bloqueado no ambiente de desenvolvimento; em máquina normal use `npm run db:migrate` (não testado fora desse ambiente).
 - Interface testada apenas no Chromium (desktop e 390 px); sem auditoria com leitor de tela.
-- Fora do escopo deste módulo (não implementado): RF02–RF14 (sistemas técnicos, inspeções, ocorrências, laudos, planos, dashboards, gestão de usuários).
+- Fora do escopo (não implementado): inspeções, ocorrências, laudos, planos, dashboards e gestão de usuários.
 
+
+---
+
+# Módulo MOD-02 — Catálogo técnico e sistemas prediais (RF-011 a RF-022)
+
+Telas explicadas em [README-TELAS.md](README-TELAS.md). Para atualizar um clone existente:
+```bash
+git pull && npm install && npx prisma generate
+npm run db:migrate        # aplica 2 migrações novas (20260201000000_catalog e ..._catalog_integrity)
+npm run db:seed:catalog   # opcional: catálogo inicial genérico
+npm run dev
+```
+
+## Situação dos requisitos
+| RF | Requisito | Situação |
+|---|---|---|
+| RF-011 | Catálogo mestre | Implementado |
+| RF-012 | ID único e imutável do componente | Implementado (gerado e protegido por gatilho no banco) |
+| RF-013 | Hierarquia sistema/subsistema/tipo/componente | Implementado |
+| RF-014 | Componente vinculado a local do empreendimento | Implementado |
+| RF-015 | Inclusão de itens | Implementado |
+| RF-016 | Edição preservando referências | Implementado |
+| RF-017 | Desativação sem apagar histórico | Implementado |
+| RF-018 | Sistemas selecionados por empreendimento | Implementado |
+| RF-019 | Biblioteca normativa (norma/edição/seção) e vínculo | Implementado |
+| RF-020 | Critérios e formulário por tipo | Implementado (define o formulário; **não há ainda execução de inspeção**) |
+| RF-021 | Manifestações e classificações distintas | Implementado |
+| RF-022 | Histórico do componente | **PARCIAL**: só alterações de cadastro; inspeções/ocorrências dependem de RF-035/RF-037, não implementados |
+
+## Tabelas e API
+11 tabelas novas (`catalog_items`, `components`, `project_systems`, `norms`, `norm_editions`, `norm_sections`, `catalog_item_norm_sections`, `inspection_criteria`, `manifestations`, `technical_classifications`, `manifestation_classifications`) e 39 rotas novas (`/api/catalog`, `/api/components`, `/api/norms`, `/api/criteria`, `/api/manifestations`, `/api/classifications`, `/api/projects/:id/systems|components` e ações `deactivate`/`reactivate`).
+
+## Testes executados
+`npm test`: **132 testes passando** (81 do RF01 + 51 do MOD-02) contra PostgreSQL real, incluindo gatilhos do banco, permissões e isolamento entre organizações. A interface foi percorrida por script Playwright (Chromium, desktop e 390 px) com criação de critério, subsistema e componente; esse script não está versionado.
+
+## Limitações do MOD-02
+- RF-022 parcial (acima).
+- O tipo de um componente e o empreendimento dele não podem ser alterados depois de criados (decisão de projeto, para preservar histórico).
+- Desativar/reativar itens do catálogo exige Administrador; não há exclusão física.
+- O catálogo é por organização (não há catálogo global compartilhado).
+- O seed do catálogo é genérico; das normas traz só código, título e ano, com a seção "1 – Escopo" como espaço reservado — **a equipe técnica deve cadastrar as seções reais**. Nenhum texto de norma foi transcrito.
+- Sem importação/exportação em massa do catálogo; sem leitor de tela testado; verificado só no Chromium.

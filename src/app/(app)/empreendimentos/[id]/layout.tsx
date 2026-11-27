@@ -18,7 +18,7 @@ export default function ProjectLayout({ children, params }: { children: React.Re
       </>
     );
   }
-  const tabs = [[base, "Visão geral"], [`${base}/estrutura`, "Estrutura física"], [`${base}/responsaveis`, "Responsáveis"], [`${base}/historico`, "Histórico"]];
+  const tabs = [[base, "Visão geral"], [`${base}/estrutura`, "Estrutura física"], [`${base}/sistemas`, "Sistemas"], [`${base}/componentes`, "Componentes"], [`${base}/responsaveis`, "Responsáveis"], [`${base}/historico`, "Histórico"]];
   return (
     <>
       <nav className="crumbs" aria-label="Você está em"><Link href="/empreendimentos">Empreendimentos</Link> / <span>{data?.name ?? "…"}</span></nav>
@@ -32,7 +32,7 @@ export default function ProjectLayout({ children, params }: { children: React.Re
           </div>
           {data.status === "INACTIVE" && <div className="alert alert-warn" style={{ marginBottom: 16 }}>Empreendimento inativo: somente consulta. Reative-o na lista de empreendimentos para voltar a editar.</div>}
           <nav className="tabs" aria-label="Seções do empreendimento">
-            {tabs.map(([href, label]) => <Link key={href} href={href} aria-current={path === href ? "page" : undefined}>{label}</Link>)}
+            {tabs.map(([href, label]) => <Link key={href} href={href} aria-current={path === href || (href !== base && path.startsWith(href + "/")) ? "page" : undefined}>{label}</Link>)}
           </nav>
           {children}
         </ProjectCtx.Provider>

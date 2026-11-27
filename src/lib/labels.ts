@@ -96,3 +96,14 @@ export const historyCategoryLabels = {
 export const roleLabels = { ADMIN: "Administrador", EDITOR: "Editor", VIEWER: "Consulta" } as const;
 
 export type Labels = Record<string, string>;
+
+// ── MOD-02 – Catálogo técnico ──
+export const catalogKindLabels = { SYSTEM: "Sistema", SUBSYSTEM: "Subsistema", TYPE: "Tipo de componente" } as const;
+export const criterionResponseLabels = {
+  PASS_FAIL: "Conforme / Não conforme",
+  YES_NO: "Sim / Não",
+  NUMBER: "Valor numérico",
+  TEXT: "Texto livre",
+  SINGLE_CHOICE: "Escolha única",
+} as const;
+export const classificationKindLabels = { SEVERITY: "Gravidade", ORIGIN: "Origem", RISK: "Risco", URGENCY: "Urgência", OTHER: "Outra" } as const;
